@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>My Web Map</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- ✔️ Existing CSS + Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+
+  <!-- ✔️ ✅ Add These CSS and JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-search@2.9.9/dist/leaflet-search.min.css">
+  <script src="https://unpkg.com/leaflet-search@2.9.9/dist/leaflet-search.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- ✔️ Existing styles -->
+  <style>
+    #map { height: 100vh; }
+    #popup-chart {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      width: 300px;
+      height: 200px;
+      background: white;
+      border: 1px solid #ccc;
+      padding: 10px;
+      z-index: 999;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ✔️ ✅ Add Popup Chart Container -->
+<div id="popup-chart">
+  <canvas id="chart"></canvas>
+</div>
+
+<!-- ✔️ Map Div -->
+<div id="map"></div>
+
+<!-- ✔️ Start Script -->
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+
+// ✅ Initialize Map
+var map = L.map('map').setView([1.5, 110], 8);
+
+// ✅ Basemap
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '© OpenStreetMap'
+}).addTo(map);
+
+// ✅ Raster XYZ Tiles
+var raster = L.tileLayer('./tiles/{z}/{x}/{y}.png', {
+  maxZoom: 18,
+  minZoom: 5,
+  attribution: 'Raster Heatmap'
+}).addTo(map);
+
+// ✅ GeoJSON Boundary Example
+fetch('boundary.geojson')
+.then(res => res.json())
+.then(data => {
+  const geojsonLayer = L.geoJSON(data, {
+    style: { color: 'black', weight: 1, fillOpacity: 0 },
+    onEachFeature: function (feature, layer) {
+      layer.on('click', function () {
+        const pop = feature.properties.POPULATION;
+        const area = feature.properties.AREA;
+        const other = feature.properties.OTHER;
+
+        const ctx = document.getElementById('chart').getContext('2d');
+        if (window.myChart) window.myChart.destroy();
+
+        window.myChart = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: ['Population', 'Area', 'Other'],
+            datasets: [{
+              label: 'Data',
+              data: [pop, area, other],
+              backgroundColor: ['red', 'blue', 'green']
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { display: false } }
+          }
+        });
+      });
+    }
+  }).addTo(map);
+
+  // 🔍 ✅ Search Function
+  const searchControl = new L.Control.Search({
+    layer: geojsonLayer,
+    propertyName: 'NAME',
+    marker: false,
+    moveToLocation: function(latlng) {
+      map.setView(latlng, 10);
+    }
+  });
+  searchControl.on('search:locationfound', function(e) {
+    e.layer.setStyle({ fillColor: 'yellow' });
+  });
+  map.addControl(searchControl);
+});
+
+</script>
+</body>
+</html>
+
