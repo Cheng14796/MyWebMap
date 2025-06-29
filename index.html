@@ -1,149 +1,53 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <title>Web Map</title>
   <meta charset="utf-8" />
-  <title>Interactive Web Map</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet-search@2.9.9/dist/leaflet-search.min.css"/>
   <style>
-    body { margin:0; padding:0; }
     #map { height: 100vh; }
-    .button {
-      background-color: white;
-      border: 2px solid #555;
-      padding: 5px 10px;
-      cursor: pointer;
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      z-index: 1000;
-    }
-    .legend {
-      background: white;
-      padding: 10px;
-      line-height: 1.5;
-      position: absolute;
-      bottom: 30px;
-      left: 10px;
-      z-index: 1000;
-      border: 1px solid #555;
-    }
-    #popup-chart {
-      position: absolute;
-      bottom: 20px;
-      right: 20px;
-      width: 300px;
-      height: 200px;
-      background: white;
-      border: 1px solid #ccc;
-      padding: 10px;
-      z-index: 999;
-    }
   </style>
 </head>
-
 <body>
 
-<!-- Info Button -->
-<button class="button" onclick="alert('This is an interactive map of Sarawak with raster and district boundaries.')">
-  Info
-</button>
-
-<!-- Map -->
 <div id="map"></div>
 
-<!-- Chart Popup -->
-<div id="popup-chart">
-  <canvas id="chart"></canvas>
-</div>
-
-<!-- Legend -->
-<div class="legend">
-  <b>Elevation</b><br>
-  <i style="background:red;width:10px;height:10px;display:inline-block;"></i> High<br>
-  <i style="background:orange;width:10px;height:10px;display:inline-block;"></i> Medium<br>
-  <i style="background:pink;width:10px;height:10px;display:inline-block;"></i> Low<br>
-</div>
-
-<!-- Leaflet + Plugins -->
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-<script src="https://unpkg.com/leaflet-search@2.9.9/dist/leaflet-search.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
 <script>
-// Initialize map
-var map = L.map('map').setView([1.5, 110], 8);
+  // Initialize the map
+  var map = L.map('map').setView([1.5, 110], 8);
 
-// Basemap
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 19,
-  attribution: '© OpenStreetMap'
-}).addTo(map);
-
-// Raster Tiles
-var raster = L.tileLayer('./tiles/{z}/{x}/{y}.png', {
-  maxZoom: 18,
-  minZoom: 5,
-  attribution: 'Raster Heatmap'
-}).addTo(map);
-
-// Load GeoJSON boundary
-fetch('boundary.geojson')
-.then(res => res.json())
-.then(data => {
-  const geojsonLayer = L.geoJSON(data, {
-    style: { color: 'black', weight: 1, fillOpacity: 0 },
-    onEachFeature: function (feature, layer) {
-      layer.on('click', function () {
-        const pop = feature.properties.POPULATION || 0;
-        const area = feature.properties.AREA || 0;
-        const other = feature.properties.OTHER || 0;
-
-        const ctx = document.getElementById('chart').getContext('2d');
-        if (window.myChart) window.myChart.destroy();
-
-        window.myChart = new Chart(ctx, {
-          type: 'bar',
-          data: {
-            labels: ['Population', 'Area', 'Other'],
-            datasets: [{
-              label: 'Data',
-              data: [pop, area, other],
-              backgroundColor: ['red', 'blue', 'green']
-            }]
-          },
-          options: {
-            responsive: true,
-            plugins: { legend: { display: false } }
-          }
-        });
-
-        layer.bindPopup(`
-          <b>District:</b> ${feature.properties.NAME_2}<br>
-          <b>Population:</b> ${pop}<br>
-          <b>Area:</b> ${area} km²
-        `).openPopup();
-      });
-    }
+  // Basemap
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 18,
+      attribution: '© OpenStreetMap'
   }).addTo(map);
 
-  // Search Bar
-  const searchControl = new L.Control.Search({
-    layer: geojsonLayer,
-    propertyName: 'NAME_2',
-    marker: false,
-    moveToLocation: function(latlng) {
-      map.setView(latlng, 10);
-    }
-  });
-  searchControl.on('search:locationfound', function(e) {
-    e.layer.setStyle({ fillColor: 'yellow' });
-  });
-  map.addControl(searchControl);
-});
+  // Raster Tiles
+  var raster = L.tileLayer('./tiles/{z}/{x}/{y}.png', {
+      attribution: 'Raster Heatmap',
+      maxZoom: 18,
+      minZoom: 5
+  }).addTo(map);
+
+  // Vector boundary
+  fetch('boundary.geojson')
+    .then(res => res.json())
+    .then(data => {
+      L.geoJSON(data, {
+        style: { color: 'black', weight: 1, fillOpacity: 0 },
+        onEachFeature: function (feature, layer) {
+          layer.bindPopup(`
+            <b>District:</b> ${feature.properties.NAME_2}<br>
+            <b>Population:</b> ${feature.properties.POPULATION}<br>
+            <b>Area:</b> ${feature.properties.AREA} km²
+          `);
+        }
+      }).addTo(map);
+    });
+
 </script>
 
 </body>
