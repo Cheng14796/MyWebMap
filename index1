@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Rainfall GeoTIFF Viewer with Graphs</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <!-- Chart.js for graphs -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    html, body { margin: 0; height: 100%; }
+    #map { width: 100%; height: 100%; }
+
+    /* Controls (top-left) */
+    .controls {
+      position: absolute;
+      top: 10px; left: 10px;
+      z-index: 1000;
+      background: white;
+      padding: 8px 10px;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    .controls label { margin-right: 6px; }
+    .controls select { margin-right: 10px; }
+
+    /* Legend (top-right) */
+    .legend {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 1000;
+      background: white;
+      padding: 8px 10px;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+      font-size: 13px;
+      max-width: 200px;
+      max-height: 70vh;
+      overflow-y: auto;
+      transition: all 0.3s ease;
+    }
+    .legend.collapsed {
+      width: 40px;
+      height: 40px;
+      padding: 8px;
+      overflow: hidden;
+    }
+    .legend.collapsed .legend-content {
+      display: none;
+    }
+    .legend-toggle {
+      position: absolute;
+      top: 5px;
+      right: 5px;
+      background: #f0f0f0;
+      border: none;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1001;
+    }
+    .legend .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 3px 0;
+    }
+    .legend .swatch {
+      width: 18px;
+      height: 18px;
+      border-radius: 3px;
+      opacity: 0.9;
+      flex: 0 0 18px;
+    }
+
+    /* Graph panel (left-bottom) */
+    #graphPanel {
+      position: absolute;
+      left: 10px;
+      bottom: 10px;
+      width: 500px;
+      max-height: 45%;
+      background: white;
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+      z-index: 1000;
+      overflow-y: auto;
+      display: none;
+    }
+    #graphPanel h3 {
+      margin-top: 0;
+      margin-bottom: 15px;
+      text-align: center;
+    }
+    #closeGraph {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: #f0f0f0;
+      border: none;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    .chart-container {
+      width: 100%;
+      height: 200px;
+      margin-bottom: 15px;
+    }
+    .chart-title {
+      font-size: 14px;
+      text-align: center;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+    .tab-container {
+      display: flex;
+      margin-bottom: 10px;
+      border-bottom: 1px solid #ddd;
+    }
+    .tab {
+      padding: 6px 12px;
+      cursor: pointer;
+      background: #f0f0f0;
+      margin-right: 5px;
+      border-radius: 5px 5px 0 0;
+      font-size: 13px;
+    }
+    .tab.active {
+      background: #2B8CBE;
+      color: white;
+    }
+    
+    /* Layer control styling */
+    .leaflet-control-layers {
+      margin-top: 60px !important; /* Make space for the controls */
+    }
+    
+    /* Loading indicator */
+    .loading {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid rgba(255,255,255,.3);
+      border-radius: 50%;
+      border-top-color: #2B8CBE;
+      animation: spin 1s ease-in-out infinite;
+      margin-right: 10px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <label for="year">Year:</label>
+    <select id="year"></select>
+    <label for="month">Month:</label>
+    <select id="month">
+      <option value="1">Jan</option>
+      <option value="2">Feb</option>
+      <option value="3">Mar</option>
+      <option value="4">Apr</option>
+      <option value="5">May</option>
+      <option value="6">Jun</option>
+      <option value="7">Jul</option>
+      <option value="8">Aug</option>
+      <option value="9">Sep</option>
+      <option value="10">Oct</option>
+      <option value="11">Nov</option>
+      <option value="12">Dec</option>
+    </select>
+  </div>
+
+  <!-- Graph Panel -->
+  <div id="graphPanel">
+    <button id="closeGraph">×</button>
+    <h3>Rainfall Analysis at Selected Location</h3>
+    
+    <div class="tab-container">
+      <div class="tab active" data-tab="yearly">Yearly Trends</div>
+      <div class="tab" data-tab="monthly">Monthly Distribution</div>
+    </div>
+    
+    <div id="yearlyTab">
+      <div class="chart-title">Rainfall Trends by Year (Selected Month)</div>
+      <div class="chart-container">
+        <canvas id="yearlyChart"></canvas>
+      </div>
+    </div>
+    
+    <div id="monthlyTab" style="display:none">
+      <div class="chart-title">Rainfall Distribution by Month (Selected Year)</div>
+      <div class="chart-container">
+        <canvas id="monthlyChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- JS libs -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/georaster"></script>
+  <script src="https://unpkg.com/georaster-layer-for-leaflet/dist/georaster-layer-for-leaflet.min.js"></script>
+  <script src="https://unpkg.com/geoblaze"></script>
+
+  <script>
+    // ======= Color classes: single source for BOTH legend & renderer =======
+    // Updated with 50mm increments
+    const CLASSES = [
+      { min: 1,   max: 50,    color: "#E8F5FF", label: "1–50"     }, // Very light blue
+      { min: 50,  max: 100,   color: "#D6EAF8", label: "50–100"   }, // Light blue
+      { min: 100, max: 150,   color: "#AED6F1", label: "100–150"  }, // Light blue 2
+      { min: 150, max: 200,   color: "#85C1E9", label: "150–200"  }, // Light blue 3
+      { min: 200, max: 250,   color: "#5DADE2", label: "200–250"  }, // Medium blue
+      { min: 250, max: 300,   color: "#3498DB", label: "250–300"  }, // Blue
+      { min: 300, max: 350,   color: "#2E86C1", label: "300–350"  }, // Dark blue 1
+      { min: 350, max: 400,   color: "#2874A6", label: "350–400"  }, // Dark blue 2
+      { min: 400, max: 450,   color: "#21618C", label: "400–450"  }, // Dark blue 3
+      { min: 450, max: 500,   color: "#1B4F72", label: "450–500"  }, // Dark blue 4
+      { min: 500, max: 550,   color: "#F9E79F", label: "500–550"  }, // Light yellow
+      { min: 550, max: 600,   color: "#F7DC6F", label: "550–600"  }, // Yellow
+      { min: 600, max: 650,   color: "#F1C40F", label: "600–650"  }, // Dark yellow
+      { min: 650, max: 700,   color: "#D4AC0D", label: "650–700"  }, // Gold
+      { min: 700, max: 750,   color: "#B7950B", label: "700–750"  }, // Dark gold
+      { min: 750, max: 800,   color: "#F5B7B1", label: "750–800"  }, // Light red
+      { min: 800, max: 850,   color: "#F1948A", label: "800–850"  }, // Red
+      { min: 850, max: 900,   color: "#EC7063", label: "850–900"  }, // Dark red 1
+      { min: 900, max: 950,   color: "#E74C3C", label: "900–950"  }, // Dark red 2
+      { min: 950, max: 1000,  color: "#CB4335", label: "950–1000" }, // Dark red 3
+      { min: 1000, max: Infinity, color: "#7D3C98", label: "1000+" }  // Purple for highest values
+    ];
+
+    function colorFor(value) {
+      if (value == null || isNaN(value)) return null;   // NoData - transparent
+      if (value < 1) return null;                       // values < 1 are transparent
+      const c = CLASSES.find(c => value >= c.min && value < c.max);
+      return c ? c.color : null;
+    }
+
+    // ======= Map setup =======
+    const map = L.map("map", { zoomControl: false }).setView([2.5, 113], 6);
+    L.control.zoom({ position: "topright" }).addTo(map);
+    
+    // Base layers - Enhanced with better contour options
+    const osmLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "© OpenStreetMap contributors",
+      name: "Standard Map"
+    });
+    
+    // OpenTopoMap - Good for contours
+    const contourLayer = L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", {
+      maxZoom: 17,
+      attribution: '© OpenStreetMap contributors, © OpenTopoMap',
+      name: "Contour Map (OpenTopoMap)"
+    });
+    
+    // Stamen Terrain - Excellent for terrain visualization
+    const stamenTerrain = L.tileLayer('https://stamen-tiles-{s}.a.ssl.fastly.net/terrain/{z}/{x}/{y}{r}.jpg', {
+      maxZoom: 18,
+      attribution: 'Map tiles by <a href="http://stamen.com">Stamen Design</a>, <a href="http://creativecommons.org/licenses/by/3.0">CC BY 3.0</a> &mdash; Map data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      name: "Terrain (Stamen)"
+    });
+    
+    // Esri WorldShadedRelief - Excellent terrain visualization
+    const esriShadedRelief = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Shaded_Relief/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 16,
+      attribution: 'Tiles &copy; Esri &mdash; Source: Esri',
+      name: "Shaded Relief (Esri)"
+    });
+    
+    // CartoDB Voyager - Clean base map with subtle terrain
+    const cartoVoyager = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      maxZoom: 20,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      name: "Voyager (CartoDB)"
+    });
+    
+    // Esri WorldTopoMap - Good balance of features and terrain
+    const esriTopo = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19,
+      attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ, TomTom, Intermap, iPC, USGS, FAO, NPS, NRCAN, GeoBase, Kadaster NL, Ordnance Survey, Esri Japan, METI, Esri China (Hong Kong), and the GIS User Community',
+      name: "Topographic (Esri)"
+    });
+    
+    // Add default base layer to map
+    stamenTerrain.addTo(map);
+    
+    const baseLayers = {
+      "Terrain (Stamen)": stamenTerrain,
+      "Shaded Relief (Esri)": esriShadedRelief,
+      "Topographic (Esri)": esriTopo,
+      "Contour Map (OpenTopoMap)": contourLayer,
+      "Voyager (CartoDB)": cartoVoyager,
+      "Standard Map": osmLayer
+    };
+    
+    // Create layer control but don't add it yet
+    const layerControl = L.control.layers(baseLayers, null, {position: 'bottomright'});
+    
+    // Year dropdown (1981–2024)
+    const yearSelect = document.getElementById("year");
+    for (let y = 1981; y <= 2024; y++) {
+      const opt = document.createElement("option");
+      opt.value = y;
+      opt.textContent = y;
+      yearSelect.appendChild(opt);
+    }
+    yearSelect.value = "1981";
+
+    const monthSelect = document.getElementById("month");
+    monthSelect.value = "1";
+
+    const rasterCache = {};
+    let currentRaster = null;
+    let rasterLayer = null;
+    let clickMarker = null;
+    let yearlyChart = null;
+    let monthlyChart = null;
+    let currentBandIndex = Number(monthSelect.value) - 1;
+    let currentCoordinates = null;
+    let isLoading = false;
+
+    async function loadRaster(year) {
+      const fileName = `C${year}.tif`;
+
+      if (!rasterCache[year]) {
+        try {
+          const resp = await fetch(fileName);
+          if (!resp.ok) {
+            console.error("Failed to fetch:", fileName, resp.status);
+            alert(`Can't load ${fileName}. Check filename/location & run via a local server.`);
+            return;
+          }
+          const arr = await resp.arrayBuffer();
+          rasterCache[year] = await parseGeoraster(arr);
+        } catch (error) {
+          console.error("Error loading raster:", error);
+          alert(`Error loading ${fileName}. Check console for details.`);
+          return;
+        }
+      }
+
+      currentRaster = rasterCache[year];
+
+      if (rasterLayer) {
+        map.removeLayer(rasterLayer);
+        rasterLayer = null;
+      }
+
+      rasterLayer = new GeoRasterLayer({
+        georaster: currentRaster,
+        opacity: 0.7,
+        resolution: 256,
+        pixelValuesToColorFn: (values) => {
+          const arr = Array.isArray(values) ? values : [values];
+          const vRaw = arr[currentBandIndex];
+          const v = (vRaw == null || isNaN(vRaw)) ? null : Number(vRaw);
+          const color = colorFor(v);
+          return color || null; // null => transparent
+        }
+      });
+
+      rasterLayer.addTo(map);
+      
+      // Add the raster layer as an overlay to the layer control
+      layerControl.addOverlay(rasterLayer, "Rainfall Data");
+      
+      // Only fit bounds if the raster has valid bounds
+      try {
+        const b = rasterLayer.getBounds();
+        if (b.isValid() && !map.getBounds().contains(b)) {
+          map.fitBounds(b);
+        }
+      } catch (error) {
+        console.warn("Could not get raster bounds:", error);
+      }
+    }
+
+    // Function to create/update the yearly rainfall chart
+    function createYearlyChart(yearlyData, monthName, coordinates) {
+      const ctx = document.getElementById('yearlyChart').getContext('2d');
+      
+      if (yearlyChart) {
+        yearlyChart.destroy();
+      }
+      
+      const years = Object.keys(yearlyData);
+      const rainfallValues = years.map(year => yearlyData[year]);
+      
+      yearlyChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: years,
+          datasets: [{
+            label: `Rainfall in ${monthName} (mm)`,
+            data: rainfallValues,
+            borderColor: '#2B8CBE',
+            backgroundColor: 'rgba(43, 140, 190, 0.1)',
+            borderWidth: 2,
+            pointBackgroundColor: '#2B8CBE',
+            pointRadius: 3,
+            pointHoverRadius: 5,
+            fill: true,
+            tension: 0.3
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  return `${context.dataset.label}: ${context.raw !== null ? context.raw.toFixed(2) : 'N/A'} mm`;
+                }
+              }
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              title: {
+                display: true,
+                text: 'Rainfall (mm)'
+              }
+            },
+            x: {
+              title: {
+                display: true,
+                text: 'Year'
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // Function to create/update the monthly rainfall chart
+    function createMonthlyChart(monthlyData, year, coordinates) {
+      const ctx = document.getElementById('monthlyChart').getContext('2d');
+      
+      if (monthlyChart) {
+        monthlyChart.destroy();
+      }
+      
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                         'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const rainfallValues = monthlyData;
+      
+      monthlyChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: monthNames,
+          datasets: [{
+            label: `Rainfall in ${year} (mm)`,
+            data: rainfallValues,
+            backgroundColor: 'rgba(43, 140, 190, 0.7)',
+            borderColor: '#2B8CBE',
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  return `Rainfall: ${context.raw !== null ? context.raw.toFixed(2) : 'N/A'} mm`;
+                }
+              }
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              title: {
+                display: true,
+                text: 'Rainfall (mm)'
+              }
+            },
+            x: {
+              title: {
+                display: true,
+                text: 'Month'
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // Function to collect rainfall data for all years at a specific location
+    async function collectYearlyRainfallData(lng, lat, monthIndex) {
+      const yearlyData = {};
+      const years = Array.from({length: 2024-1981+1}, (_, i) => 1981 + i);
+      
+      for (const year of years) {
+        try {
+          if (!rasterCache[year]) {
+            const fileName = `C${year}.tif`;
+            const resp = await fetch(fileName);
+            if (!resp.ok) {
+              yearlyData[year] = null;
+              continue;
+            }
+            const arr = await resp.arrayBuffer();
+            rasterCache[year] = await parseGeoraster(arr);
+          }
+          
+          const vals = await geoblaze.identify(rasterCache[year], [lng, lat]);
+          if (vals && vals[monthIndex] != null && !isNaN(vals[monthIndex])) {
+            yearlyData[year] = Number(vals[monthIndex]);
+          } else {
+            yearlyData[year] = null;
+          }
+        } catch (error) {
+          console.error(`Error processing year ${year}:`, error);
+          yearlyData[year] = null;
+        }
+      }
+      
+      return yearlyData;
+    }
+
+    // Function to collect rainfall data for all months in a specific year
+    async function collectMonthlyRainfallData(lng, lat, year) {
+      const monthlyData = new Array(12).fill(null);
+      
+      try {
+        if (!rasterCache[year]) {
+          const fileName = `C${year}.tif`;
+          const resp = await fetch(fileName);
+          if (!resp.ok) return monthlyData;
+          const arr = await resp.arrayBuffer();
+          rasterCache[year] = await parseGeoraster(arr);
+        }
+        
+        const vals = await geoblaze.identify(rasterCache[year], [lng, lat]);
+        if (vals && Array.isArray(vals)) {
+          for (let i = 0; i < 12; i++) {
+            if (vals[i] != null && !isNaN(vals[i])) {
+              monthlyData[i] = Number(vals[i]);
+            }
+          }
+        }
+      } catch (error) {
+        console.error(`Error processing monthly data for ${year}:`, error);
+      }
+      
+      return monthlyData;
+    }
+
+    // Tab switching functionality
+    function setupTabListeners() {
+      document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', function() {
+          // Update tab UI
+          document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+          this.classList.add('active');
+          
+          // Show/hide appropriate content
+          const tabName = this.getAttribute('data-tab');
+          document.getElementById('yearlyTab').style.display = tabName === 'yearly' ? 'block' : 'none';
+          document.getElementById('monthlyTab').style.display = tabName === 'monthly' ? 'block' : 'none';
+          
+          // If switching to monthly tab and we have coordinates, update the monthly chart
+          if (tabName === 'monthly' && currentCoordinates) {
+            updateMonthlyChart(currentCoordinates[0], currentCoordinates[1], yearSelect.value);
+          } else if (tabName === 'yearly' && currentCoordinates) {
+            updateYearlyChart(currentCoordinates[0], currentCoordinates[1], monthSelect.value);
+          }
+        });
+      });
+    }
+
+    // Function to update the monthly chart
+    async function updateMonthlyChart(lat, lng, year) {
+      document.getElementById('graphPanel').innerHTML = `
+        <button id="closeGraph">×</button>
+        <h3>Rainfall Analysis at Selected Location</h3>
+        
+        <div class="tab-container">
+          <div class="tab" data-tab="yearly">Yearly Trends</div>
+          <div class="tab active" data-tab="monthly">Monthly Distribution</div>
+        </div>
+        
+        <div id="yearlyTab" style="display:none">
+          <div class="chart-title">Rainfall Trends by Year (Selected Month)</div>
+          <div class="chart-container">
+            <canvas id="yearlyChart"></canvas>
+          </div>
+        </div>
+        
+        <div id="monthlyTab">
+          <div class="chart-title">Rainfall Distribution by Month (Selected Year)</div>
+          <div class="chart-container">
+            <canvas id="monthlyChart"></canvas>
+          </div>
+        </div>
+      `;
+      
+      // Reattach event listeners to tabs and close button
+      setupTabListeners();
+      document.getElementById('closeGraph').addEventListener('click', () => {
+        document.getElementById('graphPanel').style.display = 'none';
+      });
+      
+      document.getElementById('graphPanel').style.display = 'block';
+      
+      // Show loading message
+      const monthlyCtx = document.getElementById('monthlyChart').getContext('2d');
+      monthlyCtx.clearRect(0, 0, monthlyCtx.canvas.width, monthlyCtx.canvas.height);
+      monthlyCtx.font = "16px Arial";
+      monthlyCtx.textAlign = "center";
+      monthlyCtx.fillText("Loading monthly data...", monthlyCtx.canvas.width/2, monthlyCtx.canvas.height/2);
+      
+      // Collect and display monthly data
+      try {
+        const monthlyData = await collectMonthlyRainfallData(lng, lat, year);
+        createMonthlyChart(monthlyData, year, [lat, lng]);
+      } catch (error) {
+        console.error("Error updating monthly chart:", error);
+        monthlyCtx.clearRect(0, 0, monthlyCtx.canvas.width, monthlyCtx.canvas.height);
+        monthlyCtx.font = "14px Arial";
+        monthlyCtx.textAlign = "center";
+        monthlyCtx.fillText("Error loading data. Please try again.", monthlyCtx.canvas.width/2, monthlyCtx.canvas.height/2);
+      }
+    }
+
+    // Function to update the yearly chart
+    async function updateYearlyChart(lat, lng, month) {
+      const monthIndex = Number(month) - 1;
+      const monthName = monthSelect.options[monthIndex].text;
+      
+      document.getElementById('graphPanel').innerHTML = `
+        <button id="closeGraph">×</button>
+        <h3>Rainfall Analysis at Selected Location</h3>
+        
+        <div class="tab-container">
+          <div class="tab active" data-tab="yearly">Yearly Trends</div>
+          <div class="tab" data-tab="monthly">Monthly Distribution</div>
+        </div>
+        
+        <div id="yearlyTab">
+          <div class="chart-title">Rainfall Trends by Year (Selected Month)</div>
+          <div class="chart-container">
+            <canvas id="yearlyChart"></canvas>
+          </div>
+        </div>
+        
+        <div id="monthlyTab" style="display:none">
+          <div class="chart-title">Rainfall Distribution by Month (Selected Year)</div>
+          <div class="chart-container">
+            <canvas id="monthlyChart"></canvas>
+          </div>
+        </div>
+      `;
+      
+      // Reattach event listeners to tabs and close button
+      setupTabListeners();
+      document.getElementById('closeGraph').addEventListener('click', () => {
+        document.getElementById('graphPanel').style.display = 'none';
+      });
+      
+      document.getElementById('graphPanel').style.display = 'block';
+      
+      // Show loading message
+      const yearlyCtx = document.getElementById('yearlyChart').getContext('2d');
+      yearlyCtx.clearRect(0, 0, yearlyCtx.canvas.width, yearlyCtx.canvas.height);
+      yearlyCtx.font = "16px Arial";
+      yearlyCtx.textAlign = "center";
+      yearlyCtx.fillText("Loading yearly data...", yearlyCtx.canvas.width/2, yearlyCtx.canvas.height/2);
+      
+      // Collect and display yearly data
+      try {
+        const yearlyData = await collectYearlyRainfallData(lng, lat, monthIndex);
+        createYearlyChart(yearlyData, monthName, [lat, lng]);
+      } catch (error) {
+        console.error("Error updating yearly chart:", error);
+        yearlyCtx.clearRect(0, 0, yearlyCtx.canvas.width, yearlyCtx.canvas.height);
+        yearlyCtx.font = "14px Arial";
+        yearlyCtx.textAlign = "center";
+        yearlyCtx.fillText("Error loading data. Please try again.", yearlyCtx.canvas.width/2, yearlyCtx.canvas.height/2);
+      }
+    }
+
+    // UI events
+    yearSelect.addEventListener("change", () => {
+      loadRaster(yearSelect.value);
+      if (clickMarker) { map.removeLayer(clickMarker); clickMarker = null; }
+    });
+
+    monthSelect.addEventListener("change", () => {
+      currentBandIndex = Number(monthSelect.value) - 1;
+      if (rasterLayer) rasterLayer.redraw();
+      if (clickMarker) { map.removeLayer(clickMarker); clickMarker = null; }
+    });
+
+    // Click handler
+    map.on("click", async (e) => {
+      if (!currentRaster || isLoading) return;
+      
+      isLoading = true;
+      const lat = e.latlng.lat;
+      const lng = e.latlng.lng;
+      currentCoordinates = [lat, lng];
+
+      let vals;
+      try {
+        vals = await geoblaze.identify(currentRaster, [lng, lat]);
+      } catch (err) {
+        console.error("identify error:", err);
+      }
+      const v = (vals && vals[currentBandIndex] != null && !isNaN(vals[currentBandIndex]))
+        ? Number(vals[currentBandIndex]).toFixed(2) + " mm" : "No data";
+
+      if (clickMarker) {
+        map.removeLayer(clickMarker);
+        clickMarker = null;
+      }
+
+      try {
+        const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`);
+        const data = await response.json();
+        const placeName = data.display_name || "Unknown location";
+        clickMarker = L.marker([lat, lng]).addTo(map)
+          .bindPopup(`
+            <strong>Coordinates:</strong> [${lat.toFixed(5)}, ${lng.toFixed(5)}]<br>
+            <strong>Rainfall (${monthSelect.options[currentBandIndex].text} ${yearSelect.value}):</strong> ${v}<br>
+            <strong>Address:</strong> ${placeName}
+          `)
+          .openPopup();
+      } catch (error) {
+        console.error("Reverse geocoding failed:", error);
+        clickMarker = L.marker([lat, lng]).addTo(map)
+          .bindPopup(`
+            <strong>Coordinates:</strong> [${lat.toFixed(5)}, ${lng.toFixed(5)}]<br>
+            <strong>Rainfall (${monthSelect.options[currentBandIndex].text} ${yearSelect.value}):</strong> ${v}<br>
+            <strong>Address:</strong> (reverse geocode failed)
+          `)
+          .openPopup();
+      } finally {
+        // Show yearly chart by default
+        updateYearlyChart(lat, lng, monthSelect.value);
+        isLoading = false;
+      }
+    });
+
+    // Create legend (top-right) with toggle button
+    function createLegend() {
+      const legendDiv = document.createElement('div');
+      legendDiv.className = 'legend';
+      
+      // Create toggle button
+      const toggleBtn = document.createElement('button');
+      toggleBtn.className = 'legend-toggle';
+      toggleBtn.innerHTML = '−';
+      toggleBtn.title = 'Collapse legend';
+      toggleBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        legendDiv.classList.toggle('collapsed');
+        this.innerHTML = legendDiv.classList.contains('collapsed') ? '+' : '−';
+        this.title = legendDiv.classList.contains('collapsed') ? 'Expand legend' : 'Collapse legend';
+      });
+      
+      // Create legend content container
+      const legendContent = document.createElement('div');
+      legendContent.className = 'legend-content';
+      legendContent.innerHTML = "<strong>Rainfall (mm / month)</strong>";
+
+      // No data
+      const rowNoData = document.createElement("div");
+      rowNoData.className = "row";
+      const swNoData = document.createElement("span");
+      swNoData.className = "swatch";
+      swNoData.style.border = "1px solid #999";
+      swNoData.style.background = "linear-gradient(45deg, rgba(0,0,0,0.12) 25%, transparent 25%, transparent 50%, rgba(0,0,0,0.12) 50%, rgba(0,0,0,0.12) 75%, transparent 75%, transparent)";
+      swNoData.style.backgroundSize = "8px 8px";
+      const lbNoData = document.createElement("span");
+      lbNoData.textContent = "No data";
+      rowNoData.appendChild(swNoData);
+      rowNoData.appendChild(lbNoData);
+      legendContent.appendChild(rowNoData);
+
+      // Values < 1 (transparent)
+      const rowTransparent = document.createElement("div");
+      rowTransparent.className = "row";
+      const swTransparent = document.createElement("span");
+      swTransparent.className = "swatch";
+      swTransparent.style.border = "1px solid #999";
+      swTransparent.style.background = "transparent";
+      const lbTransparent = document.createElement("span");
+      lbTransparent.textContent = "< 1 mm (transparent)";
+      rowTransparent.appendChild(swTransparent);
+      rowTransparent.appendChild(lbTransparent);
+      legendContent.appendChild(rowTransparent);
+
+      // Actual classes - only show a few with a "show more" option
+      const visibleClasses = CLASSES.slice(0, 5);
+      const hiddenClasses = CLASSES.slice(5);
+      
+      visibleClasses.forEach(c => {
+        const row = document.createElement("div");
+        row.className = "row";
+        const sw = document.createElement("span");
+        sw.className = "swatch";
+        sw.style.background = c.color;
+        const lb = document.createElement("span");
+        lb.textContent = c.label + " mm";
+        row.appendChild(sw);
+        row.appendChild(lb);
+        legendContent.appendChild(row);
+      });
+      
+      // Show more button
+      const showMoreRow = document.createElement("div");
+      showMoreRow.className = "row";
+      const showMoreBtn = document.createElement("button");
+      showMoreBtn.textContent = "Show all ranges...";
+      showMoreBtn.style.background = "none";
+      showMoreBtn.style.border = "none";
+      showMoreBtn.style.color = "#2B8CBE";
+      showMoreBtn.style.cursor = "pointer";
+      showMoreBtn.style.textDecoration = "underline";
+      showMoreBtn.style.padding = "0";
+      showMoreBtn.addEventListener("click", function() {
+        // Remove the show more button
+        showMoreRow.remove();
+        
+        // Add all remaining classes
+        hiddenClasses.forEach(c => {
+          const row = document.createElement("div");
+          row.className = "row";
+          const sw = document.createElement("span");
+          sw.className = "swatch";
+          sw.style.background = c.color;
+          const lb = document.createElement("span");
+          lb.textContent = c.label + " mm";
+          row.appendChild(sw);
+          row.appendChild(lb);
+          legendContent.appendChild(row);
+        });
+      });
+      showMoreRow.appendChild(showMoreBtn);
+      legendContent.appendChild(showMoreRow);
+      
+      // Add content and toggle button to legend
+      legendDiv.appendChild(legendContent);
+      legendDiv.appendChild(toggleBtn);
+      
+      return legendDiv;
+    }
+
+    // Add legend to the map (top-right)
+    const legend = createLegend();
+    map.getContainer().appendChild(legend);
+
+    // Close graph panel event
+    document.addEventListener('click', function(e) {
+      if (e.target && e.target.id === 'closeGraph') {
+        document.getElementById('graphPanel').style.display = 'none';
+      }
+    });
+
+    // Initial load
+    loadRaster(yearSelect.value);
+    
+    // Add layer control to map after initial load
+    layerControl.addTo(map);
+    
+    // Setup tab listeners initially
+    setupTabListeners();
+  </script>
+</body>
+</html>
